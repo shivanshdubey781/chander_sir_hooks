@@ -1,26 +1,53 @@
+from contextlib import asynccontextmanager
 import os
+import html
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import httpx
 from dotenv import load_dotenv
-from database import init_db, save_report, get_all_reports
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+from database import init_db, save_report, get_all_reports, add_to_watchlist, get_active_watchlist
+from monitor import check_watchlist, end_of_day_reset
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES_DIR = os.path.join(BASE_DIR, "templates")
 
-import html
-
 load_dotenv()
-app = FastAPI(title="Chartlink Telegram Webhook Bridge")
+
+scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    # Every 5 minutes, 9:15 AM - 3:30 PM IST, Mon-Fri
+    scheduler.add_job(
+        check_watchlist,
+        CronTrigger(day_of_week="mon-fri", hour="9-15", minute="*/5"),
+        id="check_watchlist_job",
+        replace_existing=True,
+    )
+    # End-of-day reset at 3:35 PM IST
+    scheduler.add_job(
+        end_of_day_reset,
+        CronTrigger(day_of_week="mon-fri", hour=15, minute=35),
+        id="end_of_day_reset_job",
+        replace_existing=True,
+    )
+    scheduler.start()
+    print("[SCHEDULER] APScheduler started for Asia/Kolkata timezone")
+    yield
+    scheduler.shutdown()
+
+app = FastAPI(title="Chartlink Telegram Webhook Bridge", lifespan=lifespan)
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage" if BOT_TOKEN else None
-
-init_db()
 
 @app.post("/webhook/chartlink")
 async def chartlink_webhook(request: Request, key: str = ""):
@@ -46,10 +73,13 @@ async def chartlink_webhook(request: Request, key: str = ""):
 
     save_report(scan_name_raw, stocks_raw, prices_raw, triggered_at_raw)
 
+    # Auto-add flagged symbols to stateful active watchlist for VWMA monitoring
+    stock_list = [s.strip() for s in stocks_raw.split(",") if s.strip()]
+    for symbol in stock_list:
+        add_to_watchlist(symbol)
+
     scan_name = html.escape(scan_name_raw)
     triggered_at = html.escape(triggered_at_raw)
-
-    stock_list = [s.strip() for s in stocks_raw.split(",") if s.strip()]
     price_list = [p.strip() for p in prices_raw.split(",") if p.strip()]
     
     lines = []
@@ -78,8 +108,6 @@ async def chartlink_webhook(request: Request, key: str = ""):
 
     return {"status": "ok"}
 
-
-
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     reports = get_all_reports()
@@ -88,11 +116,13 @@ async def dashboard(request: Request):
     except TypeError:
         return templates.TemplateResponse("index.html", {"request": request, "reports": reports})
 
-
-
 @app.get("/api/reports")
 async def api_reports():
     return get_all_reports()
+
+@app.get("/api/watchlist")
+async def api_watchlist():
+    return get_active_watchlist()
 
 @app.get("/health")
 async def health():
@@ -101,4 +131,5 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=7012, reload=True)
+
 
