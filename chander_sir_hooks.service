@@ -1,0 +1,13 @@
+[Unit]
+Description=Chander Sir Hooks - Chartlink Webhook to Telegram Bridge
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/var/www/chander_sir_hooks
+ExecStart=/var/www/chander_sir_hooks/venv/bin/uvicorn main:app --host 0.0.0.0 --port 7012
+Restart=always
+EnvironmentFile=/var/www/chander_sir_hooks/.env
+
+[Install]
+WantedBy=multi-user.target
