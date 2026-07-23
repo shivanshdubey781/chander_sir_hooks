@@ -5,4 +5,7 @@ python-dotenv
 jinja2
 apscheduler
 pandas
+smartapi-python
+pyotp
+
 

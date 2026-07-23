@@ -23,15 +23,15 @@ async def send_telegram(text: str):
     except Exception as e:
         print(f"[MONITOR TELEGRAM ERROR] {str(e)}")
 
+from angel_broker import fetch_angel_5min_candles
+
 async def get_5min_candles(symbol: str, lookback: int = 25) -> list[dict]:
     """
-    Fetch 5-minute candle data for the symbol.
-    Integrates with Angel One SmartAPI (getCandleData with FIVE_MINUTE interval).
+    Fetch 5-minute candle data for the symbol using Angel One SmartAPI.
     Returns list of dicts: [{'close': float, 'volume': float, 'timestamp': str}, ...]
     """
-    # Replace/wire to your real Angel One client (e.g. angel_broker.get_5min_candles(symbol, lookback))
-    # Placeholder returning empty array if client not configured
-    return []
+    return await fetch_angel_5min_candles(symbol, lookback_days=2)
+
 
 async def check_watchlist():
     """Runs every 5 minutes during market hours."""
